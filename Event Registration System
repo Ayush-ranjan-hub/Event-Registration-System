@@ -1,0 +1,78 @@
+from django.db import models
+from django.contrib.auth.models import User
+from django.shortcuts import render, get_object_or_404, redirect
+from django.http import JsonResponse
+from django.urls import path
+from django.views.decorators.csrf import csrf_exempt
+import json
+
+# Models
+class Event(models.Model):
+    title = models.CharField(max_length=200)
+    description = models.TextField()
+    date = models.DateField()
+    location = models.CharField(max_length=200)
+
+    def __str__(self):
+        return self.title
+
+class Registration(models.Model):
+    user = models.ForeignKey(User, on_delete=models.CASCADE)
+    event = models.ForeignKey(Event, on_delete=models.CASCADE)
+    registered_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ("user", "event")
+
+# Views
+@csrf_exempt
+def event_list(request):
+    if request.method == 'GET':
+        events = Event.objects.all().values()
+        return JsonResponse(list(events), safe=False)
+
+@csrf_exempt
+def event_detail(request, event_id):
+    event = get_object_or_404(Event, id=event_id)
+    if request.method == 'GET':
+        return JsonResponse({
+            "id": event.id,
+            "title": event.title,
+            "description": event.description,
+            "date": str(event.date),
+            "location": event.location,
+        })
+
+@csrf_exempt
+def register_for_event(request, event_id):
+    if request.method == 'POST':
+        data = json.loads(request.body)
+        user_id = data.get('user_id')
+        user = get_object_or_404(User, id=user_id)
+        event = get_object_or_404(Event, id=event_id)
+
+        # Check if already registered
+        if Registration.objects.filter(user=user, event=event).exists():
+            return JsonResponse({"message": "Already registered."}, status=400)
+
+        Registration.objects.create(user=user, event=event)
+        return JsonResponse({"message": "Registered successfully."}, status=201)
+
+@csrf_exempt
+def user_registrations(request, user_id):
+    if request.method == 'GET':
+        registrations = Registration.objects.filter(user_id=user_id).select_related('event')
+        data = [{
+            "event_id": reg.event.id,
+            "event_title": reg.event.title,
+            "registered_at": reg.registered_at,
+        } for reg in registrations]
+        return JsonResponse(data, safe=False)
+
+# URLs
+urlpatterns = [
+    path('events/', event_list, name='event_list'),
+    path('events/<int:event_id>/', event_detail, name='event_detail'),
+    path('events/<int:event_id>/register/', register_for_event, name='register_for_event'),
+    path('users/<int:user_id>/registrations/', user_registrations, name='user_registrations'),
+]
